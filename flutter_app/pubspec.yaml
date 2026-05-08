@@ -1,0 +1,51 @@
+name: click_safe
+description: clicksafe — Phishing & Malicious URL Detector
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # HTTP API calls to Flask backend
+  http: ^1.2.0
+
+  # Open safe URLs in the device browser
+  url_launcher: ^6.2.5
+
+  # Local storage: scan history, settings
+  shared_preferences: ^2.2.3
+
+  # Clipboard paste support
+  clipboard: ^0.1.3
+
+  # Share scan results
+  share_plus: ^9.0.0
+
+  # QR code scanning (scan a link from the camera)
+  mobile_scanner: ^5.2.3
+
+  # Icons
+  cupertino_icons: ^1.0.6
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_launcher_icons: ^0.14.4 
+  flutter_lints: ^4.0.0
+  rename: ^3.1.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/icon/app_icon.png
+
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  web: true
+  image_path: "assets/icon/app_icon.png"
+  min_sdk_android: 21
