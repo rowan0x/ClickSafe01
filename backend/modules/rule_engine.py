@@ -22,6 +22,16 @@
 #     patterns (Amazon product pages, YouTube, Google Maps, LinkedIn, GitHub).
 #
 #   BUG-03 FIX (retained): Thresholds >= 8 (phishing), >= 4 (suspicious).
+#
+#   ADDED — check_zero_day():
+#     New public method called by URLAnalyzer as Stage 6.5.  Detects zero-day
+#     phishing infrastructure via four pure-heuristic lenses (no I/O):
+#       ZD-1  High URL entropy + suspicious TLD
+#       ZD-2  DGA-like second-level domain
+#       ZD-3  Extreme URL length on an unrecognised domain
+#       ZD-4  Stacked obfuscation (percent-encoding + double-slash redirect)
+#     WHOIS-based newly-registered domain checks are NOT duplicated here —
+#     they already live in DeepAnalyzer._check_domain_age() (Deep Path only).
 # =============================================================================
 
 import re
@@ -347,4 +357,126 @@ class RuleEngine:
             "triggered_rules": triggered,
             "risk_score":      risk_score,
             "verdict":         verdict,
+        }
+
+    # ── Zero-Day Threat Indicators ─────────────────────────────────────────────
+    # Called from URLAnalyzer.analyze() as Stage 6.5 — after the rule engine
+    # and before ML prediction.  All checks are pure heuristics (no I/O).
+    # WHOIS-based newly-registered domain checks live in DeepAnalyzer
+    # (_check_domain_age) and are NOT duplicated here.
+
+    def check_zero_day(self, url: str) -> dict:
+        """
+        Detect zero-day phishing signals through four heuristic lenses:
+          ZD-1  High URL entropy + suspicious TLD  (auto-generated domains)
+          ZD-2  DGA-like SLD  (digit-heavy or consonant-only hostnames)
+          ZD-3  Extreme URL length on an unrecognised domain
+          ZD-4  Stacked obfuscation (percent-encoding AND double-slash redirect)
+
+        Returns:
+            {
+              'is_zero_day':    bool,
+              'zero_day_score': int,
+              'indicators':     list[dict]
+            }
+        """
+        import math
+        from urllib.parse import urlparse
+
+        parsed     = urlparse(url)
+        netloc     = parsed.netloc.lower()
+        hostname   = netloc.split(':')[0]
+        clean_host = hostname[4:] if hostname.startswith('www.') else hostname
+        host_sld   = clean_host.split('.')[0]  # second-level domain label only
+
+        indicators: list[dict] = []
+        score = 0
+
+        # ── ZD-1: High URL entropy + suspicious TLD ───────────────────────────
+        # Legitimate URLs have lower Shannon entropy; auto-generated phishing
+        # domains on free/abused TLDs produce highly random character sequences.
+        url_body = url.replace('https://', '').replace('http://', '')
+        if url_body:
+            freq: dict[str, int] = {}
+            for ch in url_body:
+                freq[ch] = freq.get(ch, 0) + 1
+            entropy = -sum(
+                (v / len(url_body)) * math.log2(v / len(url_body))
+                for v in freq.values()
+            )
+        else:
+            entropy = 0.0
+
+        has_susp_tld = any(clean_host.endswith(t) for t in self.SUSPICIOUS_TLDS)
+        if entropy > 4.5 and has_susp_tld:
+            indicators.append({
+                'indicator': 'high_entropy_suspicious_tld',
+                'detail': (
+                    f'URL Shannon entropy is {entropy:.2f} on a suspicious TLD — '
+                    'consistent with an auto-generated zero-day phishing domain.'
+                ),
+                'severity': 'high',
+            })
+            score += 3
+
+        # ── ZD-2: DGA-like SLD (digit-heavy or near-zero vowel ratio) ─────────
+        # Domain Generation Algorithms produce hostnames with high digit ratios
+        # or unnatural consonant clusters that human-chosen names never exhibit.
+        digits_in_sld = sum(c.isdigit() for c in host_sld)
+        digit_ratio   = digits_in_sld / max(len(host_sld), 1)
+        vowels_in_sld = sum(c in 'aeiou' for c in host_sld)
+        vowel_ratio   = vowels_in_sld / max(len(host_sld), 1)
+
+        if digit_ratio > 0.4 or (vowel_ratio < 0.15 and len(host_sld) > 5):
+            indicators.append({
+                'indicator': 'dga_like_hostname',
+                'detail': (
+                    f"SLD '{host_sld}' shows DGA-like characteristics "
+                    f"(digit ratio: {digit_ratio:.2f}, vowel ratio: {vowel_ratio:.2f}). "
+                    'Machine-generated hostnames are a hallmark of zero-day '
+                    'phishing infrastructure.'
+                ),
+                'severity': 'high',
+            })
+            score += 3
+
+        # ── ZD-3: Extreme URL length on an unrecognised domain ────────────────
+        # Newly deployed phishing pages frequently use long, obfuscated paths
+        # to evade static pattern matching while the domain itself is unknown.
+        known_brand_in_host = any(b in clean_host for b in self._BRANDS)
+        if len(url) > 100 and not known_brand_in_host:
+            indicators.append({
+                'indicator': 'extreme_length_unknown_domain',
+                'detail': (
+                    f'URL is {len(url)} characters on an unrecognised domain — '
+                    'heavy path obfuscation on a novel domain is a zero-day evasion pattern.'
+                ),
+                'severity': 'medium',
+            })
+            score += 2
+
+        # ── ZD-4: Stacked obfuscation (percent-encoding + double-slash) ────────
+        # Layering multiple evasion techniques simultaneously is rare in
+        # legitimate traffic and strongly correlates with brand-new malicious URLs
+        # that have not yet been indexed by reputation services.
+        encoded_count = len(re.findall(r'%[0-9a-fA-F]{2}', url))
+        after_scheme  = url.split('://', 1)[-1]
+        has_dbl_slash = '//' in after_scheme
+
+        if encoded_count >= 2 and has_dbl_slash:
+            indicators.append({
+                'indicator': 'stacked_obfuscation',
+                'detail': (
+                    f'{encoded_count} percent-encoded segments combined with a '
+                    'double-slash redirect — layered evasion targets static filters '
+                    'and reputation engines that cannot yet classify the URL.'
+                ),
+                'severity': 'high',
+            })
+            score += 3
+
+        return {
+            'is_zero_day':    score >= 3,
+            'zero_day_score': score,
+            'indicators':     indicators,
         }

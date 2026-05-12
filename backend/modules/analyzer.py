@@ -22,6 +22,20 @@
 #   • ML-01:  try/except FileNotFoundError around MLEngine(); heuristic-only
 #             mode when model.pkl is absent.
 #   • app.py model_loaded field now reads analyzer.ml_engine is not None.
+#
+#   ZERO TRUST + ZERO-DAY (new):
+#   • Stage 3.5 — _zero_trust_validate(): enforces DNS resolution and
+#     SSL/TLS certificate validity on every non-whitelisted, non-blocklisted
+#     URL.  Uses only stdlib (ssl, socket) — no new dependencies.
+#     ⚠ Adds up to ~5 s latency (TLS handshake timeout).  If you need the
+#     Fast Path to remain sub-second, move this call into deep_analyzer.py
+#     and remove it from here.
+#   • Stage 6.5 — rule_engine.check_zero_day(): pure-heuristic scan for
+#     newly minted phishing infrastructure (DGA hostnames, stacked
+#     obfuscation, entropy anomalies).  Zero I/O — no latency impact.
+#   • Both results are surfaced in the response dict as 'zero_trust' and
+#     'zero_day', parsed by ZeroTrustCheck / ZeroDayCheck in scan_result.dart,
+#     and rendered as _FlagChip badges in result_screen.dart.
 # =============================================================================
 
 import logging
@@ -96,7 +110,8 @@ _NULL_FEATURES  = {}
 class URLAnalyzer:
     """
     Enhanced hybrid orchestrator: Tranco whitelist → Google Safe Browsing
-    blocklist → homoglyph detection → link masking → heuristic rules → ML.
+    blocklist → Zero Trust validation → homoglyph detection → link masking
+    → heuristic rules → Zero-Day check → ML.
     """
 
     def __init__(self):
@@ -152,7 +167,8 @@ class URLAnalyzer:
     # ── Public API ─────────────────────────────────────────────────────────────
 
     def analyze(self, raw_url: str, visible_text: str = '') -> dict:
-        """Full pipeline: validate → whitelist → blocklist → rules+ML → verdict."""
+        """Full pipeline: validate → whitelist → blocklist → Zero Trust →
+        rules + Zero-Day → ML → verdict."""
 
         # ── Stage 1: Validate & Normalise ────────────────────────────────────
         validation = self.validator.validate(raw_url)
@@ -164,6 +180,8 @@ class URLAnalyzer:
                 'explanation': '', 'whitelist': None, 'homoglyph': None,
                 'link_masking': None, 'xai': None, 'combined_score': 0,
                 'blocklist': None,
+                'zero_trust': None,
+                'zero_day':   None,
             }
 
         url = validation['url']
@@ -201,10 +219,58 @@ class URLAnalyzer:
                 'xai':             None,
                 'combined_score':  0.2,
                 'blocklist':       {'is_blocked': False, 'source': 'skipped_whitelist'},
+                # Tranco-whitelisted domains are globally vetted —
+                # Zero Trust pre-validation is implicitly satisfied.
+                'zero_trust': {
+                    'passed':       True,
+                    'ssl_valid':    True,
+                    'dns_resolved': True,
+                    'checks': [{
+                        'check':  'skipped_whitelist',
+                        'passed': True,
+                        'detail': (
+                            'Domain is in the Tranco Top-100k list — '
+                            'Zero Trust checks are pre-satisfied for globally '
+                            'recognised, audited domains.'
+                        ),
+                    }],
+                },
+                'zero_day': {
+                    'is_zero_day':    False,
+                    'zero_day_score': 0,
+                    'indicators':     [],
+                },
             }
 
         # ── Stage 3: Real-Time Blocklist (Google Safe Browsing) ───────────────
         blocklist_result = self.blocklist.check(url)
+
+        # ── Stage 3.5: Zero Trust Validation (SSL/TLS + DNS) ─────────────────
+        # Under the Zero Trust security paradigm every URL is untrusted until
+        # it passes both a live DNS resolution check and an SSL/TLS certificate
+        # verification.  Confirmed blocklist hits are already condemned — their
+        # Zero Trust result is forced to failed to avoid unnecessary I/O.
+        #
+        # ⚠ LATENCY NOTE: _zero_trust_validate() makes two network calls
+        # (DNS lookup + TLS handshake, max ~5 s each).  If you need the Fast
+        # Path to remain sub-second, move this call to the Deep Path in
+        # deep_analyzer.py and remove it here.
+        if not blocklist_result['is_blocked']:
+            zero_trust_result = self._zero_trust_validate(url)
+        else:
+            zero_trust_result = {
+                'passed':       False,
+                'ssl_valid':    False,
+                'dns_resolved': False,
+                'checks': [{
+                    'check':  'skipped_blocklisted',
+                    'passed': False,
+                    'detail': (
+                        'Zero Trust validation skipped — URL is confirmed '
+                        'blocklisted by Google Safe Browsing.'
+                    ),
+                }],
+            }
 
         # ── Stage 4: Feature Extraction ───────────────────────────────────────
         from urllib.parse import urlparse
@@ -258,6 +324,28 @@ class URLAnalyzer:
             # Force score above phishing threshold regardless of rule engine
             rule_score = max(rule_score + 8, 8)
 
+        # ── Stage 6.5: Zero-Day Threat Check ──────────────────────────────────
+        # Pure heuristic scan — no I/O.  Detects newly minted phishing
+        # infrastructure via DGA-like hostnames, stacked obfuscation, and
+        # entropy anomalies that escape standard reputation-based filters.
+        zero_day_result = self.rule_engine.check_zero_day(url)
+
+        if zero_day_result['is_zero_day']:
+            # Surface indicators as a triggered rule so they appear in the
+            # XAI breakdown and the Flutter rule-cards section.
+            indicator_summary = '; '.join(
+                i['detail'] for i in zero_day_result['indicators'][:2]
+            )
+            triggered_rules.append({
+                'name': 'Zero-Day Threat Indicators Detected',
+                'description': (
+                    f"{len(zero_day_result['indicators'])} zero-day signal(s): "
+                    f"{indicator_summary}"
+                ),
+                'severity': 'high',
+            })
+            rule_score += zero_day_result['zero_day_score']
+
         # ── Stage 7: ML Prediction ────────────────────────────────────────────
         ml_result = self._predict(features)
 
@@ -294,6 +382,8 @@ class URLAnalyzer:
             'xai':             self._build_xai(features, ml_result, triggered_rules, verdict),
             'combined_score':  combined_score,
             'blocklist':       blocklist_result,
+            'zero_trust':      zero_trust_result,
+            'zero_day':        zero_day_result,
         }
 
     def get_feature_importances(self) -> list[dict]:
@@ -375,6 +465,109 @@ class URLAnalyzer:
                     'detail':         f"Link masking: {vd} vs {href_domain}",
                 }
         return {'checked': True, 'is_masked': False, 'detail': 'Domains match.'}
+
+    @staticmethod
+    def _zero_trust_validate(url: str) -> dict:
+        """
+        Zero Trust pre-flight validation.
+
+        Enforces two hard checks on every non-whitelisted, non-blocklisted URL:
+
+          ZT-1  DNS Resolution  — the hostname must resolve to a valid IP.
+                A URL whose domain does not exist in DNS is immediately
+                suspicious; legitimate sites have stable DNS records.
+
+          ZT-2  SSL/TLS Validity — for HTTPS URLs, the certificate chain must
+                be valid and trusted by the system's CA bundle.  A self-signed,
+                expired, or mismatched certificate is a strong phishing signal.
+
+        For HTTP URLs, ZT-2 is automatically failed (no TLS present).
+
+        Returns:
+            {
+              'passed':       bool,   # True only if DNS ✓ AND TLS ✓
+              'ssl_valid':    bool,
+              'dns_resolved': bool,
+              'checks':       list[dict]   # granular per-check results
+            }
+        """
+        import ssl
+        import socket
+        from urllib.parse import urlparse as _urlparse
+
+        parsed   = _urlparse(url)
+        hostname = parsed.netloc.split(':')[0]
+        checks: list[dict] = []
+
+        # ── ZT-1: DNS Resolution ──────────────────────────────────────────────
+        try:
+            socket.getaddrinfo(
+                hostname, None,
+                family=socket.AF_UNSPEC,
+                type=socket.SOCK_STREAM,
+            )
+            dns_resolved = True
+            checks.append({
+                'check':  'dns_resolution',
+                'passed': True,
+                'detail': f"'{hostname}' resolves to a valid IP address.",
+            })
+        except socket.gaierror as exc:
+            dns_resolved = False
+            checks.append({
+                'check':  'dns_resolution',
+                'passed': False,
+                'detail': f"DNS resolution failed for '{hostname}': {exc}",
+            })
+
+        # ── ZT-2: SSL/TLS Certificate Validity ───────────────────────────────
+        if parsed.scheme == 'https':
+            try:
+                ctx = ssl.create_default_context()
+                with socket.create_connection((hostname, 443), timeout=5) as raw_sock:
+                    with ctx.wrap_socket(raw_sock, server_hostname=hostname) as tls_sock:
+                        cert = tls_sock.getpeercert()
+                ssl_valid = bool(cert)
+                checks.append({
+                    'check':  'ssl_tls_cert',
+                    'passed': True,
+                    'detail': 'SSL/TLS certificate is valid and trusted by system CA bundle.',
+                })
+            except ssl.SSLCertVerificationError as exc:
+                ssl_valid = False
+                checks.append({
+                    'check':  'ssl_tls_cert',
+                    'passed': False,
+                    'detail': f"Certificate verification failed: {exc}",
+                })
+            except ssl.SSLError as exc:
+                ssl_valid = False
+                checks.append({
+                    'check':  'ssl_tls_cert',
+                    'passed': False,
+                    'detail': f"SSL/TLS negotiation error: {exc}",
+                })
+            except OSError as exc:
+                ssl_valid = False
+                checks.append({
+                    'check':  'ssl_tls_cert',
+                    'passed': False,
+                    'detail': f"Could not open TLS connection: {exc}",
+                })
+        else:
+            ssl_valid = False
+            checks.append({
+                'check':  'ssl_tls_cert',
+                'passed': False,
+                'detail': 'URL uses HTTP — no SSL/TLS certificate present.',
+            })
+
+        return {
+            'passed':       dns_resolved and ssl_valid,
+            'ssl_valid':    ssl_valid,
+            'dns_resolved': dns_resolved,
+            'checks':       checks,
+        }
 
     @staticmethod
     def _build_xai(features: dict, ml_result: dict, triggered_rules: list, verdict: str) -> dict:

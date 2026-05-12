@@ -28,6 +28,9 @@ dependencies:
   # QR code scanning (scan a link from the camera)
   mobile_scanner: ^5.2.3
 
+  # QR code image upload from device gallery
+  image_picker: ^1.1.2
+
   # Icons
   cupertino_icons: ^1.0.6
 

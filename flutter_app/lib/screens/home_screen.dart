@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:image_picker/image_picker.dart';
 import '../config/app_config.dart';
 import '../models/scan_result.dart';
 import '../services/api_service.dart';
@@ -21,11 +22,14 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  final _urlController  = TextEditingController();
-  final _textController = TextEditingController(); // visible link text
-  final _api            = ApiService.instance;
-  final _fastAnalyzer   = FastPathAnalyzer();
-  final _history        = HistoryService.instance;
+  final _urlController    = TextEditingController();
+  final _textController   = TextEditingController(); // visible link text
+  final _api              = ApiService.instance;
+  final _fastAnalyzer     = FastPathAnalyzer();
+  final _history          = HistoryService.instance;
+  // Shared controller: used for both live camera scanning and
+  // analyzeImage() gallery decoding (mobile_scanner ^5.x API).
+  final _scannerController = MobileScannerController();
 
   bool _isScanning    = false;
   bool _showQrScanner = false;
@@ -133,6 +137,34 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // ── QR code scan ───────────────────────────────────────────────────────────
+
+  /// Lets the user pick an image from the gallery and decodes any QR code
+  /// found in it via [MobileScannerController.analyzeImage].
+  /// The decoded URL is fed directly into the existing [_scan] pipeline —
+  /// no change to how results are displayed.
+  Future<void> _pickQrFromGallery() async {
+    final XFile? image =
+        await ImagePicker().pickImage(source: ImageSource.gallery);
+    if (image == null) return; // user cancelled — do nothing
+
+    final BarcodeCapture? capture =
+        await _scannerController.analyzeImage(image.path);
+
+    if (!mounted) return;
+
+    if (capture == null || capture.barcodes.isEmpty) {
+      _showSnack('No QR code found in the selected image.');
+      return;
+    }
+
+    final String? raw = capture.barcodes.first.rawValue;
+    if (raw != null && raw.isNotEmpty) {
+      _urlController.text = raw;
+      _scan(raw); // identical entry point as the live camera path
+    } else {
+      _showSnack('QR code found but contained no readable URL.');
+    }
+  }
 
   void _onQrDetected(BarcodeCapture capture) {
     final barcode = capture.barcodes.firstOrNull;
@@ -346,10 +378,18 @@ class _HomeScreenState extends State<HomeScreen> {
                 tooltip: 'Paste from clipboard',
                 onPressed: _pasteFromClipboard,
               ),
+              // ── Gallery QR upload ─────────────────────────────────────
+              IconButton(
+                icon: const Icon(Icons.photo_library_outlined,
+                    color: AppTheme.accentPurple, size: 20),
+                tooltip: 'Upload QR code from gallery',
+                onPressed: _pickQrFromGallery,
+              ),
+              // ─────────────────────────────────────────────────────────
               IconButton(
                 icon: const Icon(Icons.qr_code_scanner_rounded,
                     color: AppTheme.accentCyan, size: 20),
-                tooltip: 'Scan QR code',
+                tooltip: 'Scan QR code with camera',
                 onPressed: () => setState(() => _showQrScanner = true),
               ),
             ],
@@ -466,13 +506,17 @@ class _HomeScreenState extends State<HomeScreen> {
         onPressed: () => setState(() => _showQrScanner = false),
       ),
     ),
-    body: MobileScanner(onDetect: _onQrDetected),
+    body: MobileScanner(
+      controller: _scannerController, // shared with analyzeImage()
+      onDetect:   _onQrDetected,
+    ),
   );
 
   @override
   void dispose() {
     _urlController.dispose();
     _textController.dispose();
+    _scannerController.dispose();
     super.dispose();
   }
 }

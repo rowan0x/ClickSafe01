@@ -34,10 +34,10 @@ extension ScanVerdictExt on ScanVerdict {
 
   Color get color {
     switch (this) {
-      case ScanVerdict.safe:           return const Color(0xFF22C55E); // green-500
-      case ScanVerdict.suspicious:     return const Color(0xFFF59E0B); // amber-500
-      case ScanVerdict.likelyPhishing: return const Color(0xFFEF4444); // red-500
-      case ScanVerdict.unknown:        return const Color(0xFF6B7280); // gray-500
+      case ScanVerdict.safe:           return const Color(0xFF22C55E);
+      case ScanVerdict.suspicious:     return const Color(0xFFF59E0B);
+      case ScanVerdict.likelyPhishing: return const Color(0xFFEF4444);
+      case ScanVerdict.unknown:        return const Color(0xFF6B7280);
     }
   }
 
@@ -232,12 +232,63 @@ class XaiResult {
     featureContributions: ((j['feature_contributions'] as List?) ?? [])
         .map((e) => FeatureContribution.fromJson(e as Map<String, dynamic>))
         .toList(),
-    mlProbabilityPct: (j['ml_probability_pct'] as num?)?.toDouble() ?? 0.0,
-    topRiskFeatures: ((j['top_risk_features'] as List?) ?? [])
+    mlProbabilityPct:  (j['ml_probability_pct'] as num?)?.toDouble() ?? 0.0,
+    topRiskFeatures:   ((j['top_risk_features'] as List?) ?? [])
         .map((e) => e.toString())
         .toList(),
-    ruleCount:        j['rule_count'] as int? ?? 0,
+    ruleCount:         j['rule_count'] as int? ?? 0,
     highSeverityRules: j['high_severity_rules'] as int? ?? 0,
+  );
+}
+
+// ── Zero Trust result ─────────────────────────────────────────────────────────
+
+/// Result of the Zero Trust pre-flight (DNS resolution + SSL/TLS cert check).
+/// Populated by analyzer.py → _zero_trust_validate().
+class ZeroTrustCheck {
+  final bool passed;
+  final bool sslValid;
+  final bool dnsResolved;
+  final List<Map<String, dynamic>> checks;
+
+  const ZeroTrustCheck({
+    required this.passed,
+    required this.sslValid,
+    required this.dnsResolved,
+    required this.checks,
+  });
+
+  factory ZeroTrustCheck.fromJson(Map<String, dynamic> j) => ZeroTrustCheck(
+    passed:      j['passed']       as bool? ?? false,
+    sslValid:    j['ssl_valid']    as bool? ?? false,
+    dnsResolved: j['dns_resolved'] as bool? ?? false,
+    checks:      (j['checks'] as List<dynamic>? ?? [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList(),
+  );
+}
+
+// ── Zero-Day result ───────────────────────────────────────────────────────────
+
+/// Result of the Zero-Day heuristic scan.
+/// Populated by rule_engine.py → check_zero_day().
+class ZeroDayCheck {
+  final bool isZeroDay;
+  final int  zeroDayScore;
+  final List<Map<String, dynamic>> indicators;
+
+  const ZeroDayCheck({
+    required this.isZeroDay,
+    required this.zeroDayScore,
+    required this.indicators,
+  });
+
+  factory ZeroDayCheck.fromJson(Map<String, dynamic> j) => ZeroDayCheck(
+    isZeroDay:    j['is_zero_day']    as bool? ?? false,
+    zeroDayScore: j['zero_day_score'] as int?  ?? 0,
+    indicators:   (j['indicators'] as List<dynamic>? ?? [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList(),
   );
 }
 
@@ -261,6 +312,8 @@ class ScanResult {
   final double combinedScore;
   final ScanPathType pathType;
   final DateTime scannedAt;
+  final ZeroTrustCheck? zeroTrust;
+  final ZeroDayCheck?   zeroDayCheck;
 
   // Deep path extras (populated when pathType == ScanPathType.deep)
   final List<Map<String, dynamic>> redirectChain;
@@ -292,6 +345,8 @@ class ScanResult {
     required this.combinedScore,
     required this.pathType,
     required this.scannedAt,
+    this.zeroTrust,
+    this.zeroDayCheck,
     this.redirectChain = const [],
     this.finalUrl = '',
     this.bitbDetected = false,
@@ -306,11 +361,13 @@ class ScanResult {
 
   // ── Factory: Fast Path (/analyze response) ───────────────────────────────
   factory ScanResult.fromFastPathJson(Map<String, dynamic> j) {
-    final mlJson = j['ml_result'] as Map<String, dynamic>?;
-    final whJson = j['whitelist'] as Map<String, dynamic>?;
-    final hgJson = j['homoglyph'] as Map<String, dynamic>?;
+    final mlJson = j['ml_result']    as Map<String, dynamic>?;
+    final whJson = j['whitelist']    as Map<String, dynamic>?;
+    final hgJson = j['homoglyph']    as Map<String, dynamic>?;
     final lmJson = j['link_masking'] as Map<String, dynamic>?;
-    final xiJson = j['xai'] as Map<String, dynamic>?;
+    final xiJson = j['xai']          as Map<String, dynamic>?;
+    final ztJson = j['zero_trust']   as Map<String, dynamic>?;
+    final zdJson = j['zero_day']     as Map<String, dynamic>?;
 
     return ScanResult(
       success:        j['success'] as bool? ?? false,
@@ -332,6 +389,8 @@ class ScanResult {
       combinedScore:  (j['combined_score'] as num?)?.toDouble() ?? 0.0,
       pathType:       ScanPathType.fast,
       scannedAt:      DateTime.now(),
+      zeroTrust:      ztJson != null ? ZeroTrustCheck.fromJson(ztJson) : null,
+      zeroDayCheck:   zdJson != null ? ZeroDayCheck.fromJson(zdJson) : null,
     );
   }
 
@@ -365,6 +424,8 @@ class ScanResult {
       combinedScore:    fast.combinedScore,
       pathType:         ScanPathType.deep,
       scannedAt:        DateTime.now(),
+      zeroTrust:        fast.zeroTrust,
+      zeroDayCheck:     fast.zeroDayCheck,
       // Deep path fields
       redirectChain:    (deepJson['redirect_chain'] as List? ?? [])
           .map((e) => e as Map<String, dynamic>)

@@ -64,7 +64,8 @@ class ResultScreen extends StatelessWidget {
               _buildExplanationCard(),
               const SizedBox(height: 16),
 
-              // ── Special flags: whitelist / homoglyph / link masking ────────
+              // ── Special flags: whitelist / homoglyph / link masking /
+              //                  Zero Trust / Zero-Day ─────────────────────────
               _buildSpecialFlags(),
 
               // ── Deep path results (if available) ──────────────────────────
@@ -210,6 +211,48 @@ class ResultScreen extends StatelessWidget {
         label: 'Link masking: shows "${lm.visibleDomain}"',
         color: AppTheme.dangerRed,
       ));
+    }
+
+    // ── Zero Trust Validation ─────────────────────────────────────────────
+    // Always rendered when data is present — Zero Trust is a security posture,
+    // not just an alert. Shows DNS and TLS sub-results in the label when failed.
+    final zt = result.zeroTrust;
+    if (zt != null) {
+      final String ztLabel = zt.passed
+          ? 'Zero Trust: Passed (DNS ✓  TLS ✓)'
+          : [
+              'Zero Trust: Failed',
+              if (!zt.dnsResolved) 'DNS ✗',
+              if (!zt.sslValid)    'TLS ✗',
+            ].join(' · ');
+
+      flags.add(_FlagChip(
+        icon:  zt.passed
+            ? Icons.verified_user_rounded
+            : Icons.gpp_bad_rounded,
+        label: ztLabel,
+        color: zt.passed ? AppTheme.safeGreen : AppTheme.dangerRed,
+      ));
+    }
+
+    // ── Zero-Day Threat Check ─────────────────────────────────────────────
+    // Show "Detected" badge only when indicators exist (avoids noise on every
+    // clean scan).  Show "No Indicators" to confirm the check actually ran.
+    final zd = result.zeroDayCheck;
+    if (zd != null) {
+      if (zd.isZeroDay) {
+        flags.add(_FlagChip(
+          icon:  Icons.warning_amber_rounded,
+          label: 'Zero-Day: ${zd.indicators.length} Indicator(s) Detected',
+          color: AppTheme.dangerRed,
+        ));
+      } else {
+        flags.add(_FlagChip(
+          icon:  Icons.shield_outlined,
+          label: 'Zero-Day: No Indicators',
+          color: AppTheme.safeGreen,
+        ));
+      }
     }
 
     if (flags.isEmpty) return const SizedBox.shrink();
@@ -506,8 +549,6 @@ class ResultScreen extends StatelessWidget {
                 backgroundColor: AppTheme.dangerRed),
             onPressed: () {
               Navigator.pop(ctx);
-              // Intel loop ingestion is handled in SettingsScreen;
-              // here we just show a confirmation.
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
                     content: Text('Reported. Thank you for keeping the web safer!')),
