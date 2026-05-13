@@ -47,7 +47,7 @@ ClickSafe is a mobile application that detects phishing and malicious URLs using
 ## 🏗️ Project Structure
 
 ```
-IsThisSafe/
+ClickSafe/
 ├── backend/                          # Python/Flask API
 │   ├── app.py                        # Routes & entry point
 │   ├── train_model.py                # Retrain Random Forest (19 features)
@@ -123,7 +123,7 @@ flutter doctor --android-licenses
 ### Step 1 — Start the Backend
 
 ```bash
-cd IsThisSafe/backend
+cd ClickSafe/backend
 
 # Install dependencies
 pip install -r requirements.txt
@@ -171,7 +171,7 @@ Tap **Save & Test** to verify the connection.
 ### Step 3 — Run on Emulator or Device
 
 ```bash
-cd IsThisSafe/flutter_app
+cd ClickSafe/flutter_app
 
 flutter pub get
 flutter run                      # debug mode with hot reload
@@ -183,7 +183,7 @@ flutter run -d emulator-5554     # specific device
 ### Step 4 — Build the APK
 
 ```bash
-cd IsThisSafe/flutter_app
+cd ClickSafe/flutter_app
 
 # Universal APK
 flutter build apk --release
