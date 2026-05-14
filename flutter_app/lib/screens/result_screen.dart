@@ -408,8 +408,8 @@ class ResultScreen extends StatelessWidget {
   Widget _buildFeaturesTable() => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      const Text('ML FEATURE VECTOR (14 features)',
-          style: TextStyle(
+      Text('ML FEATURE VECTOR (${result.features!.length} features)',
+          style: const TextStyle(
               color: AppTheme.textMuted,
               fontSize: 11,
               fontWeight: FontWeight.w600,
@@ -521,6 +521,22 @@ class ResultScreen extends StatelessWidget {
           },
         ),
       ),
+
+      // Proceed anyway — only shown for flagged URLs
+      if (result.verdict == ScanVerdict.suspicious ||
+          result.verdict == ScanVerdict.likelyPhishing) ...[
+        const SizedBox(height: 10),
+        SizedBox(
+          width: double.infinity,
+          child: TextButton(
+            style: TextButton.styleFrom(
+              foregroundColor: AppTheme.dangerRed,
+            ),
+            onPressed: () => _showProceedDialog(context),
+            child: const Text('Proceed at your own risk'),
+          ),
+        ),
+      ],
     ],
   );
 
@@ -555,6 +571,49 @@ class ResultScreen extends StatelessWidget {
               );
             },
             child: const Text('Report'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Proceed anyway dialog ────────────────────────────────────────────────
+
+  void _showProceedDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.bgCard,
+        title: const Text(
+          'Security Warning',
+          style: TextStyle(color: AppTheme.textPrimary),
+        ),
+        content: const Text(
+          'You are about to visit a site flagged as dangerous. '
+          'This may expose you to phishing, malware, or data theft. '
+          'Are you absolutely sure you want to proceed?',
+          style: TextStyle(color: AppTheme.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(color: AppTheme.textMuted),
+            ),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.dangerRed,
+            ),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              final uri = Uri.tryParse(result.url);
+              if (uri != null) {
+                await launchUrl(uri, mode: LaunchMode.externalApplication);
+              }
+            },
+            child: const Text('Open Anyway'),
           ),
         ],
       ),

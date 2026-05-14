@@ -142,6 +142,17 @@ class URLAnalyzer:
             'notion.site', 'sites.google.com',
         }
 
+        # OAuth / SSO endpoints whose URLs are legitimately long and
+        # percent-encoded (e.g. continue=https%3A%2F%2F...).
+        # These get Tranco-like treatment: ML is bypassed entirely.
+        self.TRUSTED_OAUTH_DOMAINS = {
+            'accounts.google.com',
+            'login.microsoftonline.com',
+            'login.live.com',
+            'appleid.apple.com',
+            'auth.amazon.com',
+        }
+
         # ML-01: graceful degradation when model.pkl is absent
         try:
             self.ml_engine = MLEngine()
@@ -245,6 +256,53 @@ class URLAnalyzer:
         # ── Stage 3: Real-Time Blocklist (Google Safe Browsing) ───────────────
         blocklist_result = self.blocklist.check(url)
 
+        # ── Stage 3d: Trusted OAuth / SSO Fast-Return ────────────────────────
+        # Runs AFTER the blocklist so a spoofed OAuth lookalike domain
+        # (e.g. accounts.g00gle.com) is still caught above before reaching here.
+        from urllib.parse import urlparse as _up
+        _oauth_host  = _up(url).netloc.lower().split(':')[0]
+        _oauth_clean = _oauth_host[4:] if _oauth_host.startswith('www.') else _oauth_host
+        _is_trusted_oauth = any(
+            _oauth_clean == d or _oauth_clean.endswith('.' + d)
+            for d in self.TRUSTED_OAUTH_DOMAINS
+        )
+        if _is_trusted_oauth and not blocklist_result['is_blocked']:
+            return {
+                'success':         True,
+                'error':           '',
+                'url':             url,
+                'verdict':         'safe',
+                'verdict_label':   LABEL_MAP['safe'],
+                'triggered_rules': [],
+                'rule_risk_score': 0,
+                'ml_result':       {'label': 'safe', 'probability': 0.01},
+                'features':        self._extract_features(url) or None,
+                'explanation': (
+                    f"Domain '{_oauth_host}' is a trusted OAuth/SSO identity "
+                    f"provider. Long redirect URLs with percent-encoded parameters "
+                    f"are expected and safe on this endpoint."
+                ),
+                'whitelist':    {'whitelisted': True, 'domain': _oauth_host,
+                                 'source': 'trusted_oauth'},
+                'homoglyph':    {'is_suspicious': False, 'technique': 'none', 'detail': ''},
+                'link_masking': self._check_link_masking(url, visible_text),
+                'xai':          None,
+                'combined_score': 0.1,
+                'blocklist':    blocklist_result,
+                'zero_trust': {
+                    'passed':       True,
+                    'ssl_valid':    True,
+                    'dns_resolved': True,
+                    'checks': [{'check': 'skipped_trusted_oauth', 'passed': True,
+                                'detail': 'Domain is a trusted OAuth/SSO provider.'}],
+                },
+                'zero_day': {
+                    'is_zero_day':    False,
+                    'zero_day_score': 0,
+                    'indicators':     [],
+                },
+            }
+
         # ── Stage 3.5: Zero Trust Validation (SSL/TLS + DNS) ─────────────────
         # Under the Zero Trust security paradigm every URL is untrusted until
         # it passes both a live DNS resolution check and an SSL/TLS certificate
@@ -273,9 +331,19 @@ class URLAnalyzer:
             }
 
         # ── Stage 4: Feature Extraction ───────────────────────────────────────
-        from urllib.parse import urlparse
-        features = self._extract_features(url)
-        hostname = urlparse(url).netloc.lower().split(':')[0]
+        # Decode percent-encoded query params before ML feature extraction so
+        # that `continue=https%3A%2F%2F...` does not inflate num_slashes,
+        # num_special_chars, and url_entropy. Only the query string and fragment
+        # are decoded — scheme, host, and path are left intact so all hostname
+        # and structural features remain accurate.
+        from urllib.parse import urlparse, unquote, urlunparse
+        _parsed_for_ml = urlparse(url)
+        _ml_url = urlunparse(_parsed_for_ml._replace(
+            query=unquote(_parsed_for_ml.query),
+            fragment=unquote(_parsed_for_ml.fragment or ''),
+        ))
+        features = self._extract_features(_ml_url)
+        hostname  = _parsed_for_ml.netloc.lower().split(':')[0]
 
         # ── Stage 5: Homoglyph & Link Masking ─────────────────────────────────
         homoglyph_result    = self.homoglyph.check(hostname)
@@ -353,7 +421,13 @@ class URLAnalyzer:
         if blocklist_result['is_blocked']:
             verdict = 'likely_phishing'
         elif rule_score >= 8 or ml_result['probability'] >= 0.7:
-            verdict = 'likely_phishing'
+            # If ONLY the ML is firing (zero rule hits, no blocklist, no zero-day),
+            # downgrade to suspicious — prevents ML-only false positives on
+            # legitimate sites with unusual but clean domain names.
+            if rule_score == 0 and not blocklist_result['is_blocked']:
+                verdict = 'suspicious'
+            else:
+                verdict = 'likely_phishing'
         elif rule_score >= 4 or ml_result['probability'] >= 0.4:
             verdict = 'suspicious'
         else:

@@ -103,7 +103,12 @@ class RuleEngine:
         r'linkedin\.com/posts/|'
         r'github\.com/[^/]+/[^/]+|'
         r'twitter\.com/[^/]+/status/|'
-        r'x\.com/[^/]+/status/'
+        r'x\.com/[^/]+/status/|'
+        r'accounts\.google\.com/|'
+        r'login\.microsoftonline\.com/|'
+        r'login\.live\.com/|'
+        r'appleid\.apple\.com/|'
+        r'auth\.amazon\.com/'
         r')',
         re.IGNORECASE,
     )
