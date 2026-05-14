@@ -71,6 +71,14 @@ def _unauthorised():
 # Routes
 # =============================================================================
 
+@app.route('/', methods=['GET'])
+def root():
+    """Root health ping — returns online status for uptime monitors."""
+    # FIX: added to handle health pings that hit / instead of /health
+    # (e.g. Render's default health check, uptime robots, Flutter connectivity test).
+    return jsonify({'status': 'online'})
+
+
 @app.route('/health', methods=['GET'])
 def health():
     """Liveness probe — Flutter app polls this on startup."""
@@ -114,11 +122,11 @@ def deep_analyze():
     if not raw_url:
         return _bad_request('url field is empty')
 
-    # FIX-3: analyzer.analyze() already validates and normalises the URL
-    # internally (Stage 1).  The normalised form is returned as fast_result['url'].
-    # Instantiating a second URLValidator here was redundant and meant the URL
-    # was validated twice on every deep-path call.
-    fast_result = analyzer.analyze(raw_url)
+    # FIX: extract visible_text from the request body and pass it to
+    # analyzer.analyze() so the link-masking detector can compare the
+    # anchor text against the actual destination URL.
+    visible_text = data.get('visible_text', '')
+    fast_result = analyzer.analyze(raw_url, visible_text=visible_text)
     if not fast_result.get('success'):
         return _bad_request(f"Invalid URL: {fast_result.get('error', 'unknown error')}")
 

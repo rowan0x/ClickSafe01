@@ -180,7 +180,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   ScanResult _buildFallbackResult(FastPathResult fast, String url) {
     return ScanResult(
-      success:       true,
+      // FIX: success must be false when an error string is set — returning
+      // success:true with a non-empty error was semantically inconsistent and
+      // caused the UI to treat a backend-offline fallback as a clean result.
+      success:       false,
       error:         'Backend offline — on-device analysis only.',
       url:           url,
       verdict:       fast.verdict,

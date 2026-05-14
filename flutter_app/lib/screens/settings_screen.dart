@@ -184,7 +184,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final ingested  = result['ingested'] as int? ?? 0;
       _setIntelMsg(
         'Ingested $ingested URL(s). '
-        '${retrained ? '✅ Model retrained!' : 'Queued (need ${result['min_for_retrain']} total to retrain).'}',
+        // FIX: use double quotes for inner ternary strings so that
+        // result['min_for_retrain'] is correctly resolved inside ${...}
+        // without the single-quote nesting causing a parse ambiguity.
+        '${retrained ? "✅ Model retrained!" : "Queued (need ${result['min_for_retrain']} total to retrain)."}',
         retrained ? AppTheme.safeGreen : AppTheme.accentCyan,
       );
       _intelUrlController.clear();

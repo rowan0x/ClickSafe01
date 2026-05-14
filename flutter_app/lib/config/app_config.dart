@@ -21,7 +21,8 @@ class AppConfig {
   // ── Default Backend URL (compile-time fallback only) ───────────────────────
   // Used when the user has not configured a custom URL in Settings.
   // To override at runtime: Settings screen → save to SharedPreferences.
-  static const String defaultBaseUrl = 'https://click-safe-api.onrender.com';
+  // FIX: updated to the correct production deployment URL.
+  static const String defaultBaseUrl = 'https://clicksafe01.onrender.com';
 
   // ── Default Intel API Key (compile-time fallback only) ────────────────────
   // IMPORTANT: In production, set a real secret via the Settings screen.

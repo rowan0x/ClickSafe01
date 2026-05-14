@@ -88,7 +88,10 @@ _FEATURE_DESCRIPTIONS: dict[str, str] = {
     'num_query_params':     'Query parameter count — many params suggest tracking/redirect',
     'has_at_sign':          '@ symbol — browsers ignore everything before @ in a URL',
     'num_underscores':      'Underscore count — underscores are uncommon in legitimate domains',
-    'is_punycode':          'Punycode/Homograph prefix (xn--) — used for look-alike domain attacks',
+    # FIX: is_punycode removed from _FEATURE_DESCRIPTIONS — the feature was
+    # already covered by the dedicated Homoglyph rule engine and its presence
+    # in the XAI output was redundant and confusing.  The feature remains in
+    # the ML vector (index 14-equivalent was superseded by has_suspicious_tld).
     # New v2 features
     'has_suspicious_tld':   'Suspicious TLD (.tk, .ml, .xyz…) — free/abused registries',
     'hostname_digit_ratio': 'Digit fraction in hostname — machine-generated domains have high ratios',
@@ -284,7 +287,16 @@ class URLAnalyzer:
                 ),
                 'whitelist':    {'whitelisted': True, 'domain': _oauth_host,
                                  'source': 'trusted_oauth'},
-                'homoglyph':    {'is_suspicious': False, 'technique': 'none', 'detail': ''},
+                'homoglyph':    {
+                    'is_suspicious':       False,
+                    'technique':           'none',
+                    # FIX: added missing keys so HomoglyphResult.fromJson() does
+                    # not fall back to empty defaults and mislead the UI.
+                    'matched_brand':       '',
+                    'normalised':          '',
+                    'levenshtein_distance': -1,
+                    'detail':              '',
+                },
                 'link_masking': self._check_link_masking(url, visible_text),
                 'xai':          None,
                 'combined_score': 0.1,
@@ -303,32 +315,26 @@ class URLAnalyzer:
                 },
             }
 
-        # ── Stage 3.5: Zero Trust Validation (SSL/TLS + DNS) ─────────────────
-        # Under the Zero Trust security paradigm every URL is untrusted until
-        # it passes both a live DNS resolution check and an SSL/TLS certificate
-        # verification.  Confirmed blocklist hits are already condemned — their
-        # Zero Trust result is forced to failed to avoid unnecessary I/O.
-        #
-        # ⚠ LATENCY NOTE: _zero_trust_validate() makes two network calls
-        # (DNS lookup + TLS handshake, max ~5 s each).  If you need the Fast
-        # Path to remain sub-second, move this call to the Deep Path in
-        # deep_analyzer.py and remove it here.
-        if not blocklist_result['is_blocked']:
-            zero_trust_result = self._zero_trust_validate(url)
-        else:
-            zero_trust_result = {
-                'passed':       False,
-                'ssl_valid':    False,
-                'dns_resolved': False,
-                'checks': [{
-                    'check':  'skipped_blocklisted',
-                    'passed': False,
-                    'detail': (
-                        'Zero Trust validation skipped — URL is confirmed '
-                        'blocklisted by Google Safe Browsing.'
-                    ),
-                }],
-            }
+        # ── Stage 3.5: Zero Trust Validation ─────────────────────────────────
+        # FIX: _zero_trust_validate() has been moved to DeepAnalyzer (deep_analyzer.py)
+        # to eliminate the 2×5-second DNS+TLS network calls it made on every Fast
+        # Path request.  The Fast Path now returns a 'deferred' placeholder so the
+        # Flutter client knows to look in the deep-path result for the full check.
+        # The _zero_trust_validate() static method is kept below for deep_analyzer.py
+        # to import and call from DeepAnalyzer.analyze().
+        zero_trust_result = {
+            'passed':       None,
+            'ssl_valid':    None,
+            'dns_resolved': None,
+            'checks': [{
+                'check':  'deferred_to_deep_path',
+                'passed': None,
+                'detail': (
+                    'Zero Trust validation deferred to Deep Path '
+                    '(DNS + TLS checks skipped on Fast Path for latency).'
+                ),
+            }],
+        }
 
         # ── Stage 4: Feature Extraction ───────────────────────────────────────
         # Decode percent-encoded query params before ML feature extraction so
@@ -412,23 +418,40 @@ class URLAnalyzer:
                 ),
                 'severity': 'high',
             })
-            rule_score += zero_day_result['zero_day_score']
 
         # ── Stage 7: ML Prediction ────────────────────────────────────────────
         ml_result = self._predict(features)
 
         # ── Stage 8: Combined Verdict ─────────────────────────────────────────
-        if blocklist_result['is_blocked']:
+        # 1. Determine severity context from rules accumulated so far
+        #    (before zero-day inflation so we get the clean baseline).
+        has_high_rule   = any(rule.get('severity') == 'high' for rule in triggered_rules)
+        base_rule_score = sum(rule.get('score', 0) for rule in triggered_rules)
+        zd_score        = zero_day_result.get('zero_day_score', 0) if zero_day_result else 0
+
+        # 2. Control Zero-Day Inflation: prevent ZD from pushing a genuinely
+        #    safe baseline over the phishing threshold on its own.
+        #    If the base rules scored < 4 and no individual high-severity rule
+        #    fired, cap the total at 3 — enough to flag as suspicious without
+        #    triggering a 'likely_phishing' verdict purely from ZD heuristics.
+        if base_rule_score < 4 and not has_high_rule:
+            rule_score = min(base_rule_score + zd_score, 3)
+        else:
+            rule_score = base_rule_score + zd_score
+
+        # 3. Verdict logic with fixed downgrade guard.
+        #    The old guard (rule_score == 0) almost never fired because even
+        #    a missing HTTPS scores ≥ 1 point, producing massive false positives.
+        #    The new guard checks rule_score >= 4 OR a high-severity rule, so
+        #    only genuine multi-signal detections escalate to likely_phishing.
+        if blocklist_result.get('is_blocked'):
             verdict = 'likely_phishing'
-        elif rule_score >= 8 or ml_result['probability'] >= 0.7:
-            # If ONLY the ML is firing (zero rule hits, no blocklist, no zero-day),
-            # downgrade to suspicious — prevents ML-only false positives on
-            # legitimate sites with unusual but clean domain names.
-            if rule_score == 0 and not blocklist_result['is_blocked']:
-                verdict = 'suspicious'
-            else:
+        elif rule_score >= 8 or ml_result.get('probability', 0) >= 0.7:
+            if rule_score >= 4 or has_high_rule:
                 verdict = 'likely_phishing'
-        elif rule_score >= 4 or ml_result['probability'] >= 0.4:
+            else:
+                verdict = 'suspicious'
+        elif rule_score >= 4 or ml_result.get('probability', 0) >= 0.4:
             verdict = 'suspicious'
         else:
             verdict = 'safe'
@@ -661,7 +684,8 @@ class URLAnalyzer:
             'has_at_sign':          (0, 1),
             'subdomain_count':      (0, 8),
             'url_entropy':          (2, 6),
-            'is_punycode':          (0, 1),
+            # FIX: is_punycode removed from FEATURE_RANGES — no longer emitted
+            # in XAI output (see _FEATURE_DESCRIPTIONS fix above).
             # New v2 features
             'has_suspicious_tld':   (0, 1),
             'hostname_digit_ratio': (0.0, 0.6),

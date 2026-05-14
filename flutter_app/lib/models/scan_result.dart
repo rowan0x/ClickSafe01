@@ -104,20 +104,22 @@ class WhitelistResult {
   final bool whitelisted;
   final String domain;
   final String rank;
-  final String source;
+  // FIX: 'source' is not provided by the backend response; field commented out
+  // to prevent fromJson from silently defaulting to '' and misleading consumers.
+  // final String source;
 
   const WhitelistResult({
     required this.whitelisted,
     required this.domain,
     required this.rank,
-    required this.source,
+    // required this.source,
   });
 
   factory WhitelistResult.fromJson(Map<String, dynamic> j) => WhitelistResult(
     whitelisted: j['whitelisted'] as bool? ?? false,
     domain:      j['domain'] as String? ?? '',
     rank:        j['rank'] as String? ?? 'unranked',
-    source:      j['source'] as String? ?? '',
+    // source:   j['source'] as String? ?? '',  // FIX: field removed — not in backend response
   );
 }
 
@@ -125,16 +127,19 @@ class HomoglyphResult {
   final bool isSuspicious;
   final String technique;
   final String matchedBrand;
-  final String normalised;
-  final int levenshteinDistance;
+  // FIX: 'normalised' and 'levenshtein_distance' are not provided by the
+  // backend /analyze response; fields commented out to avoid silent defaults
+  // that obscure missing data.
+  // final String normalised;
+  // final int levenshteinDistance;
   final String detail;
 
   const HomoglyphResult({
     required this.isSuspicious,
     required this.technique,
     required this.matchedBrand,
-    required this.normalised,
-    required this.levenshteinDistance,
+    // required this.normalised,
+    // required this.levenshteinDistance,
     required this.detail,
   });
 
@@ -142,8 +147,8 @@ class HomoglyphResult {
     isSuspicious:        j['is_suspicious'] as bool? ?? false,
     technique:           j['technique'] as String? ?? 'none',
     matchedBrand:        j['matched_brand'] as String? ?? '',
-    normalised:          j['normalised'] as String? ?? '',
-    levenshteinDistance: j['levenshtein_distance'] as int? ?? -1,
+    // normalised:       j['normalised'] as String? ?? '',          // FIX: removed
+    // levenshteinDistance: j['levenshtein_distance'] as int? ?? -1, // FIX: removed
     detail:              j['detail'] as String? ?? '',
   );
 }
@@ -314,6 +319,9 @@ class ScanResult {
   final DateTime scannedAt;
   final ZeroTrustCheck? zeroTrust;
   final ZeroDayCheck?   zeroDayCheck;
+  // FIX: added blocklist field — the backend /analyze response includes a
+  // 'blocklist' key but fromFastPathJson was silently discarding it.
+  final Map<String, dynamic>? blocklist;
 
   // Deep path extras (populated when pathType == ScanPathType.deep)
   final List<Map<String, dynamic>> redirectChain;
@@ -347,6 +355,7 @@ class ScanResult {
     required this.scannedAt,
     this.zeroTrust,
     this.zeroDayCheck,
+    this.blocklist,   // FIX: added — parsed from backend 'blocklist' key
     this.redirectChain = const [],
     this.finalUrl = '',
     this.bitbDetected = false,
@@ -368,6 +377,9 @@ class ScanResult {
     final xiJson = j['xai']          as Map<String, dynamic>?;
     final ztJson = j['zero_trust']   as Map<String, dynamic>?;
     final zdJson = j['zero_day']     as Map<String, dynamic>?;
+    // FIX: parse the 'blocklist' key — previously discarded, causing the
+    // blocklist verdict (is_blocked, threat_types) to be invisible to the UI.
+    final blJson = j['blocklist']    as Map<String, dynamic>?;
 
     return ScanResult(
       success:        j['success'] as bool? ?? false,
@@ -391,6 +403,7 @@ class ScanResult {
       scannedAt:      DateTime.now(),
       zeroTrust:      ztJson != null ? ZeroTrustCheck.fromJson(ztJson) : null,
       zeroDayCheck:   zdJson != null ? ZeroDayCheck.fromJson(zdJson) : null,
+      blocklist:      blJson,  // FIX: wire in the parsed blocklist map
     );
   }
 

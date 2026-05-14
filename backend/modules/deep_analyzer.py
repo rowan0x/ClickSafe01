@@ -188,6 +188,26 @@ class DeepAnalyzer:
         else:
             result['error'] += 'selenium_not_installed; '
 
+        # ── Step 5: Zero Trust Validation (DNS + TLS) ─────────────────────────
+        # FIX: _zero_trust_validate() moved here from analyzer.py Fast Path to
+        # eliminate the 10-second DNS+TLS latency on every /analyze call.
+        # It now runs only on the Deep Path where long runtimes are expected.
+        try:
+            result['zero_trust'] = self._zero_trust_validate(url)
+            if not result['zero_trust']['passed']:
+                result['deep_flags'].append({
+                    'flag':     'zero_trust_failed',
+                    'severity': 'high',
+                    'detail':   'URL failed Zero Trust DNS/TLS validation.',
+                })
+                result['deep_risk_score'] += 2
+        except Exception as exc:
+            logger.warning('Zero Trust validation error: %s', exc)
+            result['zero_trust'] = {
+                'passed': None, 'ssl_valid': None, 'dns_resolved': None,
+                'checks': [{'check': 'error', 'passed': False, 'detail': str(exc)}],
+            }
+
         return result
 
     # ── Private: Redirect Tracing ──────────────────────────────────────────────
@@ -398,3 +418,92 @@ class DeepAnalyzer:
                     pass
 
         return result
+
+    # ── Private: Zero Trust Validation ────────────────────────────────────────
+    # FIX: moved from URLAnalyzer._zero_trust_validate() in analyzer.py.
+    # Performs DNS resolution (ZT-1) and SSL/TLS certificate check (ZT-2).
+    # Called from analyze() above; kept as a @staticmethod so it can be tested
+    # independently without instantiating DeepAnalyzer.
+
+    @staticmethod
+    def _zero_trust_validate(url: str) -> dict:
+        """
+        Zero Trust pre-flight validation (DNS + TLS).
+
+        ZT-1  DNS Resolution  — hostname must resolve to a valid IP.
+        ZT-2  SSL/TLS Validity — for HTTPS, certificate chain must be valid.
+
+        Returns:
+            {
+              'passed':       bool,
+              'ssl_valid':    bool,
+              'dns_resolved': bool,
+              'checks':       list[dict]
+            }
+        """
+        import ssl
+        import socket
+        from urllib.parse import urlparse as _urlparse
+
+        parsed   = _urlparse(url)
+        hostname = parsed.netloc.split(':')[0]
+        checks: list[dict] = []
+
+        # ── ZT-1: DNS Resolution ──────────────────────────────────────────────
+        try:
+            socket.getaddrinfo(
+                hostname, None,
+                family=socket.AF_UNSPEC,
+                type=socket.SOCK_STREAM,
+            )
+            dns_resolved = True
+            checks.append({
+                'check':  'dns_resolution',
+                'passed': True,
+                'detail': f"'{hostname}' resolves to a valid IP address.",
+            })
+        except socket.gaierror as exc:
+            dns_resolved = False
+            checks.append({
+                'check':  'dns_resolution',
+                'passed': False,
+                'detail': f"DNS resolution failed for '{hostname}': {exc}",
+            })
+
+        # ── ZT-2: SSL/TLS Certificate Validity ───────────────────────────────
+        if parsed.scheme == 'https':
+            try:
+                ctx = ssl.create_default_context()
+                with ctx.wrap_socket(
+                    socket.socket(socket.AF_INET),
+                    server_hostname=hostname,
+                ) as ssock:
+                    ssock.settimeout(5)
+                    ssock.connect((hostname, 443))
+                ssl_valid = True
+                checks.append({
+                    'check':  'ssl_certificate',
+                    'passed': True,
+                    'detail': f"SSL/TLS certificate for '{hostname}' is valid.",
+                })
+            except (ssl.SSLError, socket.timeout, OSError) as exc:
+                ssl_valid = False
+                checks.append({
+                    'check':  'ssl_certificate',
+                    'passed': False,
+                    'detail': f"SSL/TLS validation failed for '{hostname}': {exc}",
+                })
+        else:
+            ssl_valid = False
+            checks.append({
+                'check':  'ssl_certificate',
+                'passed': False,
+                'detail': "No TLS — URL uses plain HTTP.",
+            })
+
+        return {
+            'passed':       dns_resolved and ssl_valid,
+            'ssl_valid':    ssl_valid,
+            'dns_resolved': dns_resolved,
+            'checks':       checks,
+        }
