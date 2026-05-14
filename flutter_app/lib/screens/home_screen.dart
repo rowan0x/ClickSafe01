@@ -283,33 +283,30 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildHero() => SizedBox(
-    width: double.infinity,
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        RichText(
-          textAlign: TextAlign.center,
-          text: const TextSpan(
-            style: AppTheme.headingLarge,
-            children: [
-              TextSpan(text: 'Is this link\n'),
-              TextSpan(
-                text: 'safe to click?',
-                style: TextStyle(color: AppTheme.accentBlue),
-              ),
-            ],
-          ),
+  Widget _buildHero() => Column(
+    crossAxisAlignment: CrossAxisAlignment.center, // ← changed from .start
+    children: [
+      RichText(
+        textAlign: TextAlign.center, // ← added
+        text: const TextSpan(
+          style: AppTheme.headingLarge,
+          children: [
+            TextSpan(text: 'Is this link\n'),
+            TextSpan(
+              text: 'safe to click?',
+              style: TextStyle(color: AppTheme.accentBlue),
+            ),
+          ],
         ),
-        const SizedBox(height: 8),
-        const Text(
-          'Hybrid ML + rule-based phishing detection.\n'
-          'Fast Path runs in milliseconds. Deep Path inspects the live page.',
-          textAlign: TextAlign.center,
-          style: AppTheme.bodyText,
-        ),
-      ],
-    ),
+      ),
+      const SizedBox(height: 8),
+      const Text(
+        'Hybrid ML + rule-based phishing detection.\n'
+        'Fast Path runs in milliseconds. Deep Path inspects the live page.',
+        style: AppTheme.bodyText,
+        textAlign: TextAlign.center, // ← added
+      ),
+    ],
   );
 
   Widget _buildBackendStatus() {
