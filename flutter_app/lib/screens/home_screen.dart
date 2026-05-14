@@ -255,7 +255,7 @@ class _HomeScreenState extends State<HomeScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // ── Hero ───────────────────────────────────────────────────────
-              _buildHero(),
+              Center(child: _buildHero()),
               const SizedBox(height: 28),
 
               // ── Backend status ─────────────────────────────────────────────
