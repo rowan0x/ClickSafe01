@@ -17,8 +17,8 @@ class SettingsService {
   static final SettingsService instance = SettingsService._();
 
   // ── SharedPreferences keys ─────────────────────────────────────────────────
-  static const _kBaseUrl    = 'setting_base_url';
-  static const _kIntelKey   = 'setting_intel_api_key';
+  static const _kBaseUrl  = 'setting_base_url';
+  static const _kIntelKey = 'setting_intel_api_key';
 
   // ── Getters ────────────────────────────────────────────────────────────────
 
@@ -38,18 +38,18 @@ class SettingsService {
 
   // ── Setters ────────────────────────────────────────────────────────────────
 
-  /// Persists [url] as the backend base URL.
+  /// Persists [newUrl] as the backend base URL.
   /// Pass an empty string to revert to the compile-time default.
-  Future<void> saveBaseUrl(String url) async {
+  Future<void> setBaseUrl(String newUrl) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_kBaseUrl, url.trim());
+    await prefs.setString(_kBaseUrl, newUrl.trim());
   }
 
-  /// Persists [key] as the Intel Loop API key.
+  /// Persists [newKey] as the Intel Loop API key.
   /// Pass an empty string to revert to the compile-time default.
-  Future<void> saveApiKey(String key) async {
+  Future<void> setApiKey(String newKey) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_kIntelKey, key.trim());
+    await prefs.setString(_kIntelKey, newKey.trim());
   }
 
   // ── Reset ──────────────────────────────────────────────────────────────────

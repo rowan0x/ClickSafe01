@@ -10,9 +10,11 @@ def load_phishtank(csv_path: str) -> pd.DataFrame:
 
 def load_tranco(tranco_path: str, limit: int = 50000) -> pd.DataFrame:
     """Load Tranco list as legitimate URLs."""
-    df = pd.read_csv(tranco_path, header=None, names=["rank", "domain"])
+    df = pd.read_csv(tranco_path, header=None, names=["rank", "domain"], comment='#')
     df = df.head(limit)
-    df["url"] = "https://" + df["domain"]
+    df = df.dropna(subset=["domain"])
+    df["url"] = "https://" + df["domain"].astype(str)
+    
     df["label"] = 0  # legitimate
     return df[["url", "label"]]
 

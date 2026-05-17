@@ -36,11 +36,14 @@ except ImportError:
 
 try:
     from selenium import webdriver
-    from selenium.webdriver.chrome.options import Options as ChromeOptions
     from selenium.webdriver.chrome.service import Service as ChromeService
+    from selenium.webdriver.edge.service import Service as EdgeService
+    from selenium.webdriver.firefox.service import Service as FirefoxService
     from selenium.webdriver.common.by import By
     from selenium.common.exceptions import WebDriverException, TimeoutException
     from webdriver_manager.chrome import ChromeDriverManager
+    from webdriver_manager.microsoft import EdgeChromiumDriverManager
+    from webdriver_manager.firefox import GeckoDriverManager
     _SELENIUM_AVAILABLE = True
 except ImportError:
     _SELENIUM_AVAILABLE = False
@@ -189,9 +192,6 @@ class DeepAnalyzer:
             result['error'] += 'selenium_not_installed; '
 
         # ── Step 5: Zero Trust Validation (DNS + TLS) ─────────────────────────
-        # FIX: _zero_trust_validate() moved here from analyzer.py Fast Path to
-        # eliminate the 10-second DNS+TLS latency on every /analyze call.
-        # It now runs only on the Deep Path where long runtimes are expected.
         try:
             result['zero_trust'] = self._zero_trust_validate(url)
             if not result['zero_trust']['passed']:
@@ -307,6 +307,42 @@ class DeepAnalyzer:
 
     # ── Private: Headless Browser Analysis ────────────────────────────────────
 
+    def _get_universal_driver(self):
+        """Attempts to launch Chrome, then Edge, then Firefox."""
+        
+        # 1. Try Chrome
+        try:
+            options = webdriver.ChromeOptions()
+            options.add_argument('--headless=new')
+            options.add_argument('--disable-gpu')
+            service = ChromeService(ChromeDriverManager().install())
+            return webdriver.Chrome(service=service, options=options)
+        except Exception as e:
+            logger.warning(f"Chrome failed or not found: {e}")
+
+        # 2. Try Microsoft Edge (Standard on Windows)
+        try:
+            options = webdriver.EdgeOptions()
+            options.add_argument('--headless=new')
+            options.add_argument('--disable-gpu')
+            service = EdgeService(EdgeChromiumDriverManager().install())
+            return webdriver.Edge(service=service, options=options)
+        except Exception as e:
+            logger.warning(f"Edge failed or not found: {e}")
+
+        # 3. Try Firefox
+        try:
+            options = webdriver.FirefoxOptions()
+            options.add_argument('--headless')
+            service = FirefoxService(GeckoDriverManager().install())
+            return webdriver.Firefox(service=service, options=options)
+        except Exception as e:
+            logger.error(f"Firefox failed or not found: {e}")
+            
+        # If all fail
+        raise RuntimeError("No compatible browsers (Chrome, Edge, Firefox) are installed on this system.")
+
+
     def _browser_analyze(self, url: str) -> dict:
         result = {
             'has_login_form':     False,
@@ -318,24 +354,12 @@ class DeepAnalyzer:
             'dom_signals':        [],
         }
 
-        options = ChromeOptions()
-        options.add_argument('--headless=new')
-        options.add_argument('--no-sandbox')
-        options.add_argument('--disable-dev-shm-usage')
-        options.add_argument('--disable-gpu')
-        options.add_argument('--window-size=1280,800')
-        options.add_argument('--disable-extensions')
-        options.add_argument('--ignore-certificate-errors')
-        options.add_argument(
-            '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-            'AppleWebKit/537.36 (KHTML, like Gecko) '
-            'Chrome/120.0.0.0 Safari/537.36'
-        )
-
         driver = None
         try:
-            service = ChromeService(ChromeDriverManager().install())
-            driver  = webdriver.Chrome(service=service, options=options)
+            driver = self._get_universal_driver()
+            
+            # Set required dimensions and timeouts dynamically for the universal driver
+            driver.set_window_size(1280, 800)
             driver.set_page_load_timeout(BROWSER_TIMEOUT)
 
             driver.get(url)
@@ -420,10 +444,6 @@ class DeepAnalyzer:
         return result
 
     # ── Private: Zero Trust Validation ────────────────────────────────────────
-    # FIX: moved from URLAnalyzer._zero_trust_validate() in analyzer.py.
-    # Performs DNS resolution (ZT-1) and SSL/TLS certificate check (ZT-2).
-    # Called from analyze() above; kept as a @staticmethod so it can be tested
-    # independently without instantiating DeepAnalyzer.
 
     @staticmethod
     def _zero_trust_validate(url: str) -> dict:

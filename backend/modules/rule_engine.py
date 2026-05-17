@@ -299,8 +299,8 @@ class RuleEngine:
         # This rule fires only if the domain is NOT an exact brand domain, to
         # avoid flagging 'paypal.com' itself.
         for brand in self._BRANDS:
-            # SLD contains the brand as a prefix or suffix separated by hyphen
-            if ('-' in clean_host and brand in clean_host.split('-')[0:1] + clean_host.split('-')[-1:]):
+            # SLD contains the brand as any hyphen-separated segment
+            if ('-' in clean_host and brand in clean_host.split('-')):
                 # Make sure the domain is not the real brand (paypal.com passes)
                 if not (clean_host == brand or clean_host.startswith(brand + '.')):
                     triggered.append({
@@ -332,7 +332,7 @@ class RuleEngine:
                                 'name': 'Open Redirect Parameter',
                                 'description': (
                                     f"Query parameter '{param_name}' contains an external URL "
-                                    f"as its value ('{values[0][:60]}...' if len > 60 else '{values[0]}'). "
+                                    f"as its value ('{values[0][:60] + chr(46)*3 if len(values[0]) > 60 else values[0]}'). "
                                     "Open redirects are used to lend legitimacy to phishing links by "
                                     "routing victims through a trusted domain before landing on a "
                                     "malicious page."

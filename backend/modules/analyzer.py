@@ -426,32 +426,32 @@ class URLAnalyzer:
         # 1. Determine severity context from rules accumulated so far
         #    (before zero-day inflation so we get the clean baseline).
         has_high_rule   = any(rule.get('severity') == 'high' for rule in triggered_rules)
-        base_rule_score = sum(rule.get('score', 0) for rule in triggered_rules)
         zd_score        = zero_day_result.get('zero_day_score', 0) if zero_day_result else 0
 
         # 2. Control Zero-Day Inflation: prevent ZD from pushing a genuinely
         #    safe baseline over the phishing threshold on its own.
-        #    If the base rules scored < 4 and no individual high-severity rule
+        #    If the accumulated rule score is < 4 and no high-severity rule
         #    fired, cap the total at 3 — enough to flag as suspicious without
         #    triggering a 'likely_phishing' verdict purely from ZD heuristics.
-        if base_rule_score < 4 and not has_high_rule:
-            rule_score = min(base_rule_score + zd_score, 3)
+        if rule_score < 4 and not has_high_rule:
+            rule_score = min(rule_score + zd_score, 3)
         else:
-            rule_score = base_rule_score + zd_score
+            rule_score = rule_score + zd_score
 
         # 3. Verdict logic with fixed downgrade guard.
         #    The old guard (rule_score == 0) almost never fired because even
         #    a missing HTTPS scores ≥ 1 point, producing massive false positives.
-        #    The new guard checks rule_score >= 4 OR a high-severity rule, so
-        #    only genuine multi-signal detections escalate to likely_phishing.
-        if blocklist_result.get('is_blocked'):
+        #    The new guard checks rule_score == 0: when only the ML fires
+        #    (no rules triggered), the verdict is capped at 'suspicious' to
+        #    prevent ML-only false positives from escalating to likely_phishing.
+        if blocklist_result['is_blocked']:
             verdict = 'likely_phishing'
-        elif rule_score >= 8 or ml_result.get('probability', 0) >= 0.7:
-            if rule_score >= 4 or has_high_rule:
-                verdict = 'likely_phishing'
-            else:
+        elif rule_score >= 8 or ml_result['probability'] >= 0.7:
+            if rule_score == 0 and not blocklist_result['is_blocked']:
                 verdict = 'suspicious'
-        elif rule_score >= 4 or ml_result.get('probability', 0) >= 0.4:
+            else:
+                verdict = 'likely_phishing'
+        elif rule_score >= 4 or ml_result['probability'] >= 0.4:
             verdict = 'suspicious'
         else:
             verdict = 'safe'

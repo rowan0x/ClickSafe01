@@ -1,0 +1,78 @@
+# ==========================================
+# Operating System & IDE Files
+# ==========================================
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*.tmp
+
+# ==========================================
+# Environment Variables & Secrets
+# ==========================================
+.env
+.env.local
+*.pem
+# Android keystore properties
+flutter_app/android/key.properties
+# iOS/macOS API keys
+flutter_app/ios/Runner/GeneratedPluginRegistrant.m
+flutter_app/macOS/Flutter/GeneratedPluginRegistrant.swift
+
+# ==========================================
+# ClickSafe Backend (Python / Flask)
+# ==========================================
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environments
+backend/venv/
+backend/env/
+backend/.venv/
+
+# Flask & Logs
+backend/instance/
+backend/*.log
+
+# Note: The models/model.pkl and data/ CSV files are NOT ignored by default 
+# because your README states they are included. If your training_data.csv 
+# becomes too large for GitHub (over 100MB), uncomment the lines below:
+# backend/data/training_data.csv
+# backend/data/verified_online.csv
+
+# ==========================================
+# ClickSafe Frontend (Flutter / Dart)
+# ==========================================
+# Flutter/Dart build and cache directories
+flutter_app/.dart_tool/
+flutter_app/.flutter-plugins
+flutter_app/.flutter-plugins-dependencies
+flutter_app/.pub-cache/
+flutter_app/.pub/
+flutter_app/build/
+
+# Android specific
+flutter_app/android/.gradle/
+flutter_app/android/app/build/
+flutter_app/android/captures/
+flutter_app/android/gradlew
+flutter_app/android/gradlew.bat
+flutter_app/android/local.properties
+
+# iOS specific
+flutter_app/ios/Pods/
+flutter_app/ios/.symlinks/
+flutter_app/ios/Flutter/Flutter.framework/
+flutter_app/ios/Flutter/Flutter.podspec
+flutter_app/ios/Flutter/Generated.xcconfig
+flutter_app/ios/Flutter/app.flx
+flutter_app/ios/Flutter/app.zip
+flutter_app/ios/Flutter/flutter_assets/
+flutter_app/ios/Flutter/flutter_export_environment.sh
+
+# Web specific (If you ever build Flutter for Web)
+flutter_app/web/canvaskit/

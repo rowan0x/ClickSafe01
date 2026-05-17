@@ -214,25 +214,31 @@ class ResultScreen extends StatelessWidget {
     }
 
     // ── Zero Trust Validation ─────────────────────────────────────────────
-    // Always rendered when data is present — Zero Trust is a security posture,
-    // not just an alert. Shows DNS and TLS sub-results in the label when failed.
+    // Only rendered when ZT actually ran (not deferred to deep path).
+    // On the fast path the backend returns passed=null with a single check
+    // keyed 'deferred_to_deep_path' — suppress the chip in that case so the
+    // UI never shows a false "Failed (DNS ✗ TLS ✗)" on every fast-path scan.
     final zt = result.zeroTrust;
     if (zt != null) {
-      final String ztLabel = zt.passed
-          ? 'Zero Trust: Passed (DNS ✓  TLS ✓)'
-          : [
-              'Zero Trust: Failed',
-              if (!zt.dnsResolved) 'DNS ✗',
-              if (!zt.sslValid)    'TLS ✗',
-            ].join(' · ');
+      final bool isDeferred = zt.checks.isNotEmpty &&
+          (zt.checks.first['check'] as String? ?? '') == 'deferred_to_deep_path';
+      if (!isDeferred) {
+        final String ztLabel = zt.passed
+            ? 'Zero Trust: Passed (DNS ✓  TLS ✓)'
+            : [
+                'Zero Trust: Failed',
+                if (!zt.dnsResolved) 'DNS ✗',
+                if (!zt.sslValid)    'TLS ✗',
+              ].join(' · ');
 
-      flags.add(_FlagChip(
-        icon:  zt.passed
-            ? Icons.verified_user_rounded
-            : Icons.gpp_bad_rounded,
-        label: ztLabel,
-        color: zt.passed ? AppTheme.safeGreen : AppTheme.dangerRed,
-      ));
+        flags.add(_FlagChip(
+          icon:  zt.passed
+              ? Icons.verified_user_rounded
+              : Icons.gpp_bad_rounded,
+          label: ztLabel,
+          color: zt.passed ? AppTheme.safeGreen : AppTheme.dangerRed,
+        ));
+      }
     }
 
     // ── Zero-Day Threat Check ─────────────────────────────────────────────

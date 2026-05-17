@@ -150,6 +150,14 @@ class IntelLoop:
             for sig in self._signatures
         ])
         y_new = np.array([sig['label'] for sig in self._signatures])
+        
+        if 0 not in y_new or 1 not in y_new:
+            logger.info("IntelLoop: Missing classes in batch. Injecting dummy bounds to preserve tree shapes.")
+            dummy_safe  = np.zeros((1, len(_FEATURE_ORDER)))
+            dummy_phish = np.ones((1, len(_FEATURE_ORDER)))
+            
+            X_new = np.vstack([X_new, dummy_safe, dummy_phish])
+            y_new = np.append(y_new, [0, 1])
 
         if not os.path.exists(_MODEL_PATH):
             raise FileNotFoundError(f'Base model not found at {_MODEL_PATH}. '

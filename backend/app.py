@@ -23,6 +23,9 @@ import os
 import logging
 from flask        import Flask, request, jsonify
 from flask_cors   import CORS
+from dotenv       import load_dotenv
+
+load_dotenv()
 
 from modules.analyzer      import URLAnalyzer, LABEL_MAP
 from modules.deep_analyzer import DeepAnalyzer

@@ -129,8 +129,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       return;
     }
 
-    await _settings.saveBaseUrl(newUrl);
-    await _settings.saveApiKey(newKey);
+    await _settings.setBaseUrl(newUrl);
+    await _settings.setApiKey(newKey);
 
     final saved = await _settings.getBaseUrl();
     if (mounted) {
@@ -187,7 +187,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         // FIX: use double quotes for inner ternary strings so that
         // result['min_for_retrain'] is correctly resolved inside ${...}
         // without the single-quote nesting causing a parse ambiguity.
-        '${retrained ? "✅ Model retrained!" : "Queued (need ${result['min_for_retrain']} total to retrain)."}',
+        '${retrained ? "✅ Model retrained!" : "Queued (need ${(result['min_for_retrain'] as int?) ?? 10} total to retrain)."}',
         retrained ? AppTheme.safeGreen : AppTheme.accentCyan,
       );
       _intelUrlController.clear();
